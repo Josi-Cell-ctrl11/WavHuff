@@ -20,8 +20,16 @@ import java.io.File
 import java.util.Locale
 import java.util.concurrent.Executors
 
+/**
+ * Écran principal de WavHuff, construit avec les vues Android natives.
+ *
+ * Parcours : choisir un WAV → choisir le débit → convertir → afficher les tailles → enregistrer.
+ * Les widgets appartiennent au thread principal ; les opérations audio/disque au worker.
+ * input/mp3/archive sont des fichiers temporaires privés, distincts des exports de l’utilisateur.
+ */
 class MainActivity : Activity() {
 
+    // Un seul thread de travail traite les tâches dans l’ordre, sans figer les boutons.
     private val worker = Executors.newSingleThreadExecutor()
 
     // Palette (reprise de l'app : teal #146C60)
@@ -35,6 +43,7 @@ class MainActivity : Activity() {
     private val disabledBg = Color.rgb(212, 222, 218)
     private val disabledInk = Color.rgb(138, 155, 149)
 
+    // lateinit : les références aux vues seront initialisées pendant onCreate.
     private lateinit var content: LinearLayout
     private lateinit var fileCard: LinearLayout
     private lateinit var convert: Button
@@ -48,9 +57,11 @@ class MainActivity : Activity() {
     private val segViews = ArrayList<LinearLayout>()
     private val segNums = ArrayList<TextView>()
     private val segSubs = ArrayList<TextView>()
+    // L’indice 1 correspond à 128 kbit/s, le choix par défaut.
     private var selectedBitrate = 1
     private val bitrates = listOf(96, 128, 192)
 
+    // Ces références décrivent le fichier choisi et les deux dernières sorties réussies.
     private var input: File? = null
     private var mp3: File? = null
     private var archive: File? = null
@@ -58,8 +69,10 @@ class MainActivity : Activity() {
     private var info: WavInfo? = null
     private var busy = false
 
+    /** Convertit une mesure indépendante de la densité (dp) en pixels pour Android. */
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
 
+    /** Point d’entrée de l’écran : construit les vues et définit leur état initial. */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val scroll = ScrollView(this).apply { setBackgroundColor(ground); isFillViewport = true }
@@ -68,6 +81,7 @@ class MainActivity : Activity() {
             setPadding(dp(20), dp(30), dp(20), dp(24))
         }
         scroll.addView(content); setContentView(scroll)
+        // Respecter les zones réservées aux barres système (statut et navigation).
         scroll.setOnApplyWindowInsetsListener { v, insets ->
             @Suppress("DEPRECATION")
             v.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop, insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
@@ -91,6 +105,7 @@ class MainActivity : Activity() {
 
     // ---------- UI construction ----------
 
+    /** Affiche le nom de l’application, la petite onde décorative et le lien À propos. */
     private fun buildHeader() {
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -110,6 +125,7 @@ class MainActivity : Activity() {
         content.addView(header, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(18) })
     }
 
+    /** Crée la zone cliquable qui ouvre le sélecteur de fichiers Android. */
     private fun buildFileCard() {
         fileCard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -121,6 +137,7 @@ class MainActivity : Activity() {
         content.addView(fileCard, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
     }
 
+    /** Met à jour la carte : invitation à choisir ou nom et propriétés du WAV sélectionné. */
     private fun renderFileCard() {
         fileCard.removeAllViews()
         if (input == null) {
@@ -150,6 +167,7 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Construit les trois choix de débit : chaque clic conserve son indice. */
     private fun buildSegmented() {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         bitrates.forEachIndexed { i, kb ->
@@ -173,6 +191,7 @@ class MainActivity : Activity() {
         content.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
     }
 
+    /** Mémorise le choix et colore uniquement le segment sélectionné en vert. */
     private fun selectBitrate(index: Int) {
         selectedBitrate = index
         segViews.forEachIndexed { i, seg ->
@@ -183,6 +202,7 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Crée le bouton, la barre de progression et le message d’état. */
     private fun buildConvert() {
         convert = Button(this).apply {
             text = "Convertir en MP3"; isAllCaps = false; textSize = 16f
@@ -202,12 +222,14 @@ class MainActivity : Activity() {
         content.addView(status, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
     }
 
+    /** Active le bouton seulement si un WAV est prêt et si aucune tâche ne tourne. */
     private fun styleConvert(enabled: Boolean) {
         convert.isEnabled = enabled
         convert.background = roundRect(if (enabled) green else disabledBg, 16)
         convert.setTextColor(if (enabled) Color.WHITE else disabledInk)
     }
 
+    /** Prépare les cartes de résultats et les actions d’export ; cachées avant conversion. */
     private fun buildResultsZone() {
         resultsZone = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         resultsContent = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -240,6 +262,7 @@ class MainActivity : Activity() {
         content.addView(resultsZone, LinearLayout.LayoutParams(-1, -2))
     }
 
+    /** Ajoute la mention de fonctionnement hors ligne en bas de l’écran. */
     private fun buildFooter() {
         val footer = TextView(this).apply {
             text = "Hors ligne · aucun compte · Kotlin + LAME 3.100"
@@ -250,6 +273,7 @@ class MainActivity : Activity() {
 
     // ---------- Results rendering ----------
 
+    /** Affiche les mesures fournies par CompressionStats, pour le MP3 puis le Huffman. */
     private fun renderResults(stats: CompressionStats, hs: CompressionStats, kbps: Int) {
         resultsContent.removeAllViews()
 
@@ -305,6 +329,7 @@ class MainActivity : Activity() {
         resultsContent.addView(huff, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
     }
 
+    /** Dessine une ligne de comparaison visuelle ; la valeur numérique reste la mesure exacte. */
     private fun barRow(label: String, pct: Double, value: String): LinearLayout {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         row.addView(TextView(this).apply {
@@ -315,6 +340,7 @@ class MainActivity : Activity() {
             background = roundRect(Color.argb(46, 255, 255, 255), 5)
             weightSum = 100f
         }
+        // Minimum visuel de 3 % pour garder une barre visible : ce minimum ne change pas les statistiques.
         val fillPct = Math.max(pct, 3.0).toFloat()
         track.addView(View(this).apply { background = roundRect(Color.WHITE, 5) },
             LinearLayout.LayoutParams(0, dp(9), fillPct))
@@ -327,6 +353,7 @@ class MainActivity : Activity() {
         return row
     }
 
+    /** Compose une petite colonne valeur + légende dans la carte Huffman. */
     private fun miniStat(value: String, label: String): LinearLayout {
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(TextView(this).apply { text = value; textSize = 17f; setTextColor(ink); typeface = Typeface.DEFAULT_BOLD })
@@ -334,6 +361,7 @@ class MainActivity : Activity() {
         return col
     }
 
+    /** Crée la pastille de variation de taille affichée dans la carte MP3. */
     private fun badge(txt: String) = TextView(this).apply {
         text = txt; textSize = 13f; setTextColor(Color.WHITE); typeface = Typeface.DEFAULT_BOLD
         background = roundRect(Color.argb(40, 255, 255, 255), 999); setPadding(dp(12), dp(7), dp(12), dp(7))
@@ -341,6 +369,7 @@ class MainActivity : Activity() {
 
     // ---------- Helpers ----------
 
+    /** Fabrique un fond arrondi, avec éventuellement une bordure pleine ou en pointillés. */
     private fun roundRect(fill: Int, radius: Int, stroke: Int = 0, strokeW: Int = 0, dashed: Boolean = false): GradientDrawable =
         GradientDrawable().apply {
             setColor(fill); cornerRadius = dp(radius).toFloat()
@@ -350,19 +379,23 @@ class MainActivity : Activity() {
             }
         }
 
+    /** Uniformise les titres des sections (majuscules et espacement des lettres). */
     private fun sectionLabel(t: String) = TextView(this).apply {
         text = t.uppercase(Locale.FRANCE); textSize = 11f; setTextColor(muted)
         typeface = Typeface.DEFAULT_BOLD; letterSpacing = 0.12f
     }
 
+    /** Crée un texte avec les couleurs, la taille et la graisse demandées. */
     private fun bodyText(t: String, size: Float, color: Int, bold: Boolean = false) = TextView(this).apply {
         text = t; textSize = size; setTextColor(color)
         if (bold) typeface = Typeface.DEFAULT_BOLD
         setPadding(0, dp(1), 0, dp(1))
     }
 
+    /** Prépare des paramètres de disposition avec une marge au-dessus de la vue. */
     private fun marginTop(top: Int) = LinearLayout.LayoutParams(-1, -2).apply { topMargin = top }
 
+    /** Place une icône dessinée dans un petit carré arrondi. */
     private fun chip(sizeDp: Int, bgColor: Int, kind: String, iconColor: Int, radiusDp: Int, iconDp: Int): FrameLayout {
         val f = FrameLayout(this)
         f.background = roundRect(bgColor, radiusDp)
@@ -371,15 +404,21 @@ class MainActivity : Activity() {
         return f
     }
 
+    /** Affiche les tailles en Mio : 1 Mio = 1 048 576 octets. */
     private fun fmtMio(n: Long) = String.format(Locale.FRANCE, "%.2f Mio", n / 1048576.0)
+    /** Formate la fréquence audio pour la carte du fichier. */
     private fun fmtRate(hz: Int) = if (hz % 1000 == 0) "$hz Hz" else String.format(Locale.FRANCE, "%.1f kHz", hz / 1000.0)
+    /** Le signe indique la variation de taille : moins = réduction, plus = augmentation. */
     private fun signedPercent(gain: Double): String =
         (if (gain >= 0) "−" else "+") + String.format(Locale.FRANCE, "%.2f", Math.abs(gain)) + " %"
 
+    /** Change le message affiché sous le bouton de conversion. */
     private fun setStatus(t: String) { status.text = t }
 
     // ---------- Icône vectorielle minimale ----------
 
+    // Canvas dessine ces petites icônes directement ; elles ne sont pas l’icône du lanceur.
+    // Le logo du lanceur est déclaré dans AndroidManifest et les ressources mipmap.
     private inner class IconView(ctx: Context, private val kind: String, strokeColor: Int) : View(ctx) {
         private val d = resources.displayMetrics.density
         private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -433,12 +472,14 @@ class MainActivity : Activity() {
 
     // ---------- Logique (inchangée) ----------
 
+    /** Ouvre ACTION_OPEN_DOCUMENT ; son résultat reviendra avec le code de requête 10. */
     private fun pickFile() {
         startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             type = "*/*"; addCategory(Intent.CATEGORY_OPENABLE)
         }, 10)
     }
 
+    /** Bloque les nouvelles actions pendant lecture, conversion ou enregistrement. */
     private fun setBusy(value: Boolean) {
         busy = value
         fileCard.isEnabled = !value
@@ -449,6 +490,7 @@ class MainActivity : Activity() {
         progress.visibility = if (value) View.VISIBLE else View.GONE
     }
 
+    /** Efface uniquement les fichiers temporaires et remet l’écran à zéro ; les exports restent. */
     private fun resetAll() {
         input?.delete(); mp3?.delete(); archive?.delete()
         input = null; mp3 = null; archive = null; info = null; originalName = "audio.wav"
@@ -456,6 +498,7 @@ class MainActivity : Activity() {
         renderFileCard(); styleConvert(false); setStatus("Prêt à commencer")
     }
 
+    /** Demande où enregistrer : requête 20 pour MP3, 21 pour WHF. */
     private fun createDocument(code: Int, mime: String, extension: String) {
         val name = originalName.substringBeforeLast('.', originalName)
         startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
@@ -464,6 +507,7 @@ class MainActivity : Activity() {
     }
 
     @Deprecated("Legacy result API retained for a dependency-free Activity")
+    /** Reçoit le résultat des sélecteurs Android ; une annulation ne déclenche aucun traitement. */
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode != RESULT_OK || busy) return
@@ -473,12 +517,14 @@ class MainActivity : Activity() {
             val file = if (requestCode == 20) mp3 else archive
             if (file != null) {
                 setBusy(true); setStatus("Enregistrement…")
-                worker.execute {
+                // Toute lecture/écriture potentiellement longue s’exécute hors du thread d’interface.
+        worker.execute {
                     try {
                         contentResolver.openOutputStream(uri, "wt").use { out ->
                             requireNotNull(out) { "Destination inaccessible." }; file.inputStream().use { it.copyTo(out) }
                         }
-                        runOnUiThread { setStatus("Fichier enregistré à l’emplacement choisi.") }
+                        // Seul le thread principal doit modifier les widgets Android.
+                runOnUiThread { setStatus("Fichier enregistré à l’emplacement choisi.") }
                     } catch (e: Exception) { showError(e) }
                     finally { runOnUiThread { setBusy(false) } }
                 }
@@ -486,8 +532,10 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Copie l’URI Android dans le cache puis vérifie que son contenu est un WAV pris en charge. */
     private fun loadInput(uri: Uri) {
         setBusy(true); setStatus("Lecture du WAV…")
+        // Toute lecture/écriture potentiellement longue s’exécute hors du thread d’interface.
         worker.execute {
             val file = File.createTempFile("source-", ".wav", cacheDir)
             try {
@@ -499,6 +547,7 @@ class MainActivity : Activity() {
                     requireNotNull(src) { "Fichier inaccessible." }; file.outputStream().use { src.copyTo(it) }
                 }
                 val details = WavReader.read(file)
+                // Seul le thread principal doit modifier les widgets Android.
                 runOnUiThread {
                     input?.delete(); mp3?.delete(); archive?.delete(); mp3 = null; archive = null
                     input = file; info = details; originalName = name
@@ -507,25 +556,32 @@ class MainActivity : Activity() {
                 }
             } catch (e: Exception) {
                 file.delete()
+                // Seul le thread principal doit modifier les widgets Android.
                 runOnUiThread { setStatus("Sélection non validée. Le fichier précédent reste disponible.") }
             }
             finally { runOnUiThread { setBusy(false) } }
         }
     }
 
+    /** Lance successivement le MP3 puis le Huffman, puis affiche leurs tailles réelles. */
     private fun runConversion() {
         val source = input ?: return; val details = info ?: return
         val kbps = bitrates[selectedBitrate]
         setBusy(true); progress.progress = 0; setStatus("Encodage MP3 (Huffman dans LAME)…")
+        // Toute lecture/écriture potentiellement longue s’exécute hors du thread d’interface.
         worker.execute {
             val target = File.createTempFile("converted-", ".mp3", cacheDir)
             val huff = File.createTempFile("huffman-", ".whf", cacheDir)
             try {
+                // Réserver 0..70 % de la progression au MP3, 70..100 % au Huffman.
                 Mp3Encoder.convert(source, target, details, kbps) { p -> runOnUiThread { progress.progress = p * 70 / 100 } }
+                // Seul le thread principal doit modifier les widgets Android.
                 runOnUiThread { setStatus("Compression Huffman en Kotlin…") }
                 Huffman.compress(source, huff) { p -> runOnUiThread { progress.progress = 70 + p * 30 / 100 } }
+                // Mesurer après finalisation : utiliser les octets réellement écrits, pas une estimation.
                 val stats = CompressionStats(source.length(), target.length())
                 val hs = CompressionStats(source.length(), huff.length())
+                // Seul le thread principal doit modifier les widgets Android.
                 runOnUiThread {
                     mp3?.delete(); archive?.delete(); mp3 = target; archive = huff
                     renderResults(stats, hs, kbps)
@@ -538,8 +594,10 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Affiche une erreur sur le thread principal, même si elle vient du worker. */
     private fun showError(e: Throwable) = runOnUiThread { setStatus("Erreur : ${e.message ?: "opération impossible"}") }
 
+    /** Présente le rôle de Kotlin/LAME, le lien des sources et la licence LGPL. */
     private fun showAbout() {
         val license = assets.open("LAME-COPYING.txt").bufferedReader().use { it.readText() }
         AlertDialog.Builder(this)
@@ -548,5 +606,6 @@ class MainActivity : Activity() {
             .setPositiveButton("Fermer", null).show()
     }
 
+    /** Arrête l’acceptation de nouvelles tâches quand cette Activity est détruite. */
     override fun onDestroy() { worker.shutdown(); super.onDestroy() }
 }

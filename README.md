@@ -1,5 +1,7 @@
 # WavHuff — Android / Kotlin
 
+Pour apprendre le fonctionnement, commence par [Comprendre le code](docs/COMPRENDRE_LE_CODE.md). Les classes Kotlin et le pont JNI sont commentés en français. Version avec logo : 1.0.2.
+
 Sélectionner un WAV PCM 16 bits mono/stéréo, le convertir hors ligne en véritable MP3, afficher les tailles réelles, le gain de place, la taille restante et le ratio, puis enregistrer le résultat avec le sélecteur de fichiers Android. Android 8 minimum. Aucun compte, serveur ou droit d'accès général au stockage.
 
 ## Huffman et MP3
@@ -23,7 +25,7 @@ Un gain négatif est possible (notamment pour les petits WAV ou les archives Huf
 
 ## Compiler l'APK sur GitHub
 
-Le workflow `.github/workflows/android.yml` se lance à chaque push sur `main`, pull request ou lancement manuel. Ouvrir **Actions → Build Android APK → exécution verte → Artifacts → WavHuff-APK**, extraire le ZIP puis installer `WavHuff-1.0.0.apk`.
+Le workflow `.github/workflows/android.yml` se lance à chaque push sur `main`, pull request ou lancement manuel. Ouvrir **Actions → Build Android APK → exécution verte → Artifacts → WavHuff-APK**, extraire le ZIP puis installer `WavHuff-1.0.2.apk`.
 
 L'APK est une version de test signée avec la clé debug du runner. La signature n'est pas persistante entre les runners : pour publier et garantir les mises à jour sans désinstallation, configurer une clé de production privée dans les secrets et un build release. Ne jamais commiter une clé privée dans ce dépôt.
 
