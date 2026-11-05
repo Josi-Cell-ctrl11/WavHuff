@@ -1,0 +1,4 @@
+<resources>
+    <!-- Même vert que la marque et les boutons de WavHuff. -->
+    <color name="ic_launcher_background">#146C60</color>
+</resources>
